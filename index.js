@@ -97,7 +97,7 @@ async function runAutomation(placa) {
     
     // Extraer datos limpios
     const pageContent = await page.textContent('body');
-    const lines = pageContent.split('\n').filter(line => {
+    const lines = pageContent.split('\n').map(line => line.trim()).filter(line => {
       const trimmedLine = line.trim();
       if (!trimmedLine) return false;
       const exclusionPatterns = [
@@ -122,89 +122,85 @@ async function runAutomation(placa) {
     let charges = [];
     let totalAPagar = '';
     let subtotal = '';
-    let inVehicleSection = false;
-    let inChargesSection = false;
     
-    for (const line of lines) {
-      const trimmedLine = line.trim();
+    // Encontrar información del vehículo
+    const vehicleKeywords = ['Marca:', 'Modelo:', 'Linea:', 'Tipo:', 'Color:', 'NIV:'];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       
-      if (trimmedLine.includes('Marca:') || trimmedLine.includes('Modelo:')) {
-        inVehicleSection = true;
-        inChargesSection = false;
-      }
-      
-      if (trimmedLine.includes('CARGOS DescripciónAñoMonto')) {
-        inVehicleSection = false;
-        inChargesSection = true;
-        continue;
-      }
-      
-      if (trimmedLine.includes('SUBTOTAL')) {
-        subtotal = trimmedLine;
-        continue;
-      }
-      
-      if (trimmedLine.match(/TOTAL\s*A\s*PAGAR/i) || 
-          trimmedLine.match(/TOTAL\s+.*PAGAR/i) ||
-          trimmedLine.match(/PAGO\s*TOTAL/i)) {
-        totalAPagar = trimmedLine;
-        inChargesSection = false;
-        continue;
-      }
-      
-      if (trimmedLine.includes('TOTAL MONTO CARGOS:')) {
-        if (!totalAPagar) {
-          totalAPagar = trimmedLine;
+      // Capturar información del vehículo
+      if (line.includes('Marca:')) {
+        vehicleInfo.push('Marca:');
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].includes(':')) {
+          vehicleInfo.push(lines[i + 1]);
         }
-        inChargesSection = false;
-        continue;
+      } else if (line.includes('Modelo:')) {
+        vehicleInfo.push('Modelo:');
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].includes(':')) {
+          vehicleInfo.push(lines[i + 1]);
+        }
+      } else if (line.includes('Linea:')) {
+        vehicleInfo.push('Linea:');
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].includes(':')) {
+          vehicleInfo.push(lines[i + 1]);
+        }
+      } else if (line.includes('Tipo:')) {
+        vehicleInfo.push('Tipo:');
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].includes(':')) {
+          vehicleInfo.push(lines[i + 1]);
+        }
+      } else if (line.includes('Color:')) {
+        vehicleInfo.push('Color:');
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].includes(':')) {
+          vehicleInfo.push(lines[i + 1]);
+        }
+      } else if (line.includes('NIV:')) {
+        vehicleInfo.push('NIV:');
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].includes(':')) {
+          vehicleInfo.push(lines[i + 1]);
+        }
       }
       
-      if (trimmedLine.startsWith('TOTAL') && !totalAPagar && 
-          !trimmedLine.includes('MONTO CARGOS') && 
-          trimmedLine.match(/[\d,]+\.?\d*$/)) {
-        totalAPagar = trimmedLine;
-        inChargesSection = false;
-        continue;
+      // Capturar cargos
+      if (line.match(/\d{4}\s+\$/)) {
+        charges.push(line);
       }
       
-      if (inVehicleSection && trimmedLine.includes('Este vehículo')) {
-        inVehicleSection = false;
+      // Capturar subtotal
+      if (line.includes('SUBTOTAL') && !subtotal) {
+        subtotal = line;
       }
       
-      if (inVehicleSection && trimmedLine) {
-        vehicleInfo.push(trimmedLine);
-      }
-      
-      if (inChargesSection && trimmedLine && trimmedLine.match(/\d{4}\$/)) {
-        charges.push(trimmedLine);
+      // Capturar total a pagar
+      if ((line.includes('TOTAL A PAGAR') || line.match(/TOTAL.*PAGAR/i)) && !totalAPagar) {
+        totalAPagar = line;
       }
     }
     
+    // Si no encontramos total a pagar, buscar patrones alternativos
     if (!totalAPagar) {
-      const totalAPagarRegex = /TOTAL\s*A\s*PAGAR[^$\n]*\$?\s*[\d,]+\.?\d*/gi;
-      const totalAPagarMatch = pageContent.match(totalAPagarRegex);
-      if (totalAPagarMatch && totalAPagarMatch.length > 0) {
-        totalAPagar = totalAPagarMatch[0].trim();
+      for (const line of lines) {
+        if (line.match(/PAGO\s*TOTAL/i) || line.match(/TOTAL.*\$\d/)) {
+          totalAPagar = line;
+          break;
+        }
       }
     }
     
+    // Si aún no hay total, buscar en el contenido completo
     if (!totalAPagar) {
-      const totalRegex = /TOTAL[^$\n]*\$?\s*[\d,]+\.?\d*/gi;
-      const totalMatches = pageContent.match(totalRegex);
-      if (totalMatches && totalMatches.length > 0) {
-        const filteredTotals = totalMatches.filter(t => !t.includes('MONTO CARGOS'));
-        totalAPagar = filteredTotals.length > 0 ? filteredTotals[0].trim() : totalMatches[0].trim();
+      const totalMatch = pageContent.match(/TOTAL\s*A\s*PAGAR[^$\n]*\$?\s*[\d,]+\.?\d*/gi);
+      if (totalMatch && totalMatch.length > 0) {
+        totalAPagar = totalMatch[0].trim();
       }
     }
     
     return {
       placa,
-      vehiculo: vehicleInfo.filter((line, index, arr) => {
-        return line && arr.indexOf(line) === index;
-      }),
-      cargos: charges,
-      subtotal: subtotal || 'No disponible',
+      vehiculo: vehicleInfo.filter(line => line && line.trim()),
+      cargos: charges.length > 0 ? charges : ['No se encontraron cargos'],
+      subtotal: subtotal || 'SUBTOTAL: No disponible',
       totalAPagar: totalAPagar || 'TOTAL A PAGAR: No disponible'
     };
     
@@ -234,9 +230,6 @@ function checkSimultaneousRequests(req, res, next) {
   isProcessing = true;
   console.log(`✅ Solicitud aceptada - Iniciando proceso`);
   
-  // Guardar referencia para limpiar al finalizar
-  req._processing = true;
-  
   next();
 }
 
@@ -252,16 +245,17 @@ app.get('/', (req, res) => {
     endpoints: {
       consulta: 'GET /consulta?placa=ABC123',
       consultaPost: 'POST /consulta con JSON body { "placa": "ABC123" }',
-      health: 'GET /health'
+      health: 'GET /health',
+      consola: 'GET /consulta-consola/:placa'
     },
     ejemplo: {
       url: '/consulta?placa=ABC123',
       respuesta: {
         placa: "ABC123",
-        vehiculo: ["Marca: TOYOTA", "Modelo: COROLLA"],
-        cargos: ["2024 $1,500.00"],
-        subtotal: "SUBTOTAL: $1,500.00",
-        totalAPagar: "TOTAL A PAGAR: $1,500.00"
+        vehiculo: ["Marca:", "TOYOTA", "Modelo:", "2025", "Linea:", "SIENNA HÍBRIDO", "Tipo:", "XLE, MINI VAN, SISTE", "Color:", "GRIS", "NIV:", "************45180"],
+        cargos: ["No se encontraron cargos"],
+        subtotal: "SUBTOTAL MONTO SUBSIDIO: -$198.00",
+        totalAPagar: "TOTAL A PAGAR: $3,802.00"
       }
     }
   });
@@ -307,7 +301,6 @@ app.get('/consulta', checkSimultaneousRequests, async (req, res) => {
     const resultados = await runAutomation(placaLimpia);
     const tiempo = ((Date.now() - startTime) / 1000).toFixed(2);
     
-    // Agregar tiempo de consulta como campo extra (opcional)
     const respuesta = {
       ...resultados,
       tiempoConsulta: `${tiempo} segundos`,
@@ -326,7 +319,6 @@ app.get('/consulta', checkSimultaneousRequests, async (req, res) => {
       detalles: 'Verifique: 1. Conexión a internet, 2. Proxy disponible, 3. Placa correcta'
     });
   } finally {
-    // Liberar para siguiente solicitud
     isProcessing = false;
     requestQueue--;
     console.log(`🔄 Sistema liberado. Estado: disponible`);
@@ -362,7 +354,6 @@ app.post('/consulta', checkSimultaneousRequests, async (req, res) => {
     const resultados = await runAutomation(placaLimpia);
     const tiempo = ((Date.now() - startTime) / 1000).toFixed(2);
     
-    // Agregar tiempo de consulta como campo extra (opcional)
     const respuesta = {
       ...resultados,
       tiempoConsulta: `${tiempo} segundos`,
@@ -381,7 +372,6 @@ app.post('/consulta', checkSimultaneousRequests, async (req, res) => {
       detalles: 'Verifique: 1. Conexión a internet, 2. Proxy disponible, 3. Placa correcta'
     });
   } finally {
-    // Liberar para siguiente solicitud
     isProcessing = false;
     requestQueue--;
     console.log(`🔄 Sistema liberado. Estado: disponible`);
@@ -416,18 +406,31 @@ app.get('/consulta-consola/:placa', checkSimultaneousRequests, async (req, res) 
     
     respuesta += '\nINFORMACION DEL VEHICULO:\n';
     respuesta += '-'.repeat(30) + '\n';
-    if (resultados.vehiculo.length > 0) {
-      resultados.vehiculo.forEach(linea => respuesta += linea + '\n');
-    } else {
-      respuesta += 'No se encontró información del vehículo\n';
+    
+    // Formatear la información del vehículo
+    let currentKey = '';
+    for (let i = 0; i < resultados.vehiculo.length; i++) {
+      const item = resultados.vehiculo[i];
+      if (item.endsWith(':')) {
+        currentKey = item;
+        respuesta += currentKey + '\n';
+      } else if (currentKey && i > 0 && resultados.vehiculo[i - 1].endsWith(':')) {
+        respuesta += item + '\n';
+      } else {
+        respuesta += item + '\n';
+      }
     }
     
     respuesta += '\nCARGOS:\n';
     respuesta += '-'.repeat(30) + '\n';
-    if (resultados.cargos.length > 0) {
-      resultados.cargos.forEach((cargo, index) => {
-        respuesta += `${index + 1}. ${cargo}\n`;
-      });
+    if (resultados.cargos && resultados.cargos.length > 0) {
+      if (resultados.cargos[0] === 'No se encontraron cargos') {
+        respuesta += 'No se encontraron cargos\n';
+      } else {
+        resultados.cargos.forEach((cargo, index) => {
+          respuesta += `${index + 1}. ${cargo}\n`;
+        });
+      }
     } else {
       respuesta += 'No se encontraron cargos\n';
     }
@@ -445,10 +448,81 @@ app.get('/consulta-consola/:placa', checkSimultaneousRequests, async (req, res) 
     console.error('Error en la consulta:', error);
     res.status(500).send(`Error en la consulta. Verifique:\n1. Conexión a internet\n2. Proxy disponible\n3. Placa correcta\nDetalle del error: ${error.message}\n`);
   } finally {
-    // Liberar para siguiente solicitud
     isProcessing = false;
     requestQueue--;
     console.log(`🔄 Sistema liberado. Estado: disponible`);
+  }
+});
+
+// Endpoint para formato HTML
+app.get('/consulta-html/:placa', checkSimultaneousRequests, async (req, res) => {
+  try {
+    const { placa } = req.params;
+    
+    if (!placa) {
+      isProcessing = false;
+      requestQueue--;
+      return res.status(400).send('<h1>Error: Placa requerida</h1>');
+    }
+    
+    const placaLimpia = placa.trim().toUpperCase().replace(/\s+/g, '');
+    const resultados = await runAutomation(placaLimpia);
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Consulta Vehicular - ${resultados.placa}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { background: #f0f0f0; padding: 15px; border-radius: 5px; }
+          .section { margin: 20px 0; }
+          .title { font-weight: bold; color: #333; }
+          .content { background: #f9f9f9; padding: 15px; border-radius: 5px; }
+          .cargo { margin: 5px 0; }
+          .total { font-weight: bold; color: #d9534f; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Resultados para placa: ${resultados.placa}</h1>
+          <p>Consultado el: ${new Date().toLocaleString()}</p>
+        </div>
+        
+        <div class="section">
+          <h2 class="title">Información del Vehículo</h2>
+          <div class="content">
+            ${resultados.vehiculo.map(item => `<p>${item}</p>`).join('')}
+          </div>
+        </div>
+        
+        <div class="section">
+          <h2 class="title">Cargos</h2>
+          <div class="content">
+            ${resultados.cargos.map((cargo, index) => `<div class="cargo">${index + 1}. ${cargo}</div>`).join('')}
+          </div>
+        </div>
+        
+        <div class="section">
+          <h2 class="title">Resumen</h2>
+          <div class="content">
+            <p><strong>${resultados.subtotal}</strong></p>
+            <p class="total">${resultados.totalAPagar}</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    res.set('Content-Type', 'text/html');
+    res.send(html);
+    
+  } catch (error) {
+    res.status(500).send('<h1>Error en la consulta</h1><p>Verifique la placa e intente nuevamente.</p>');
+  } finally {
+    isProcessing = false;
+    requestQueue--;
   }
 });
 
@@ -462,5 +536,7 @@ app.listen(port, () => {
   console.log(`   GET  /consulta?placa=ABC123`);
   console.log(`   POST /consulta`);
   console.log(`   GET  /consulta-consola/ABC123`);
+  console.log(`   GET  /consulta-html/ABC123`);
   console.log(`   GET  /health`);
-});
+  console.log(`   GET  /`);
+}); 
